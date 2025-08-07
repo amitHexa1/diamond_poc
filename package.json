@@ -1,0 +1,69 @@
+{
+    "name": "react-three-vite",
+    "version": "1.0.2",
+    "description": "A simple React Three Fiber + Vite starter with an import-ready CodeSandbox config.",
+    "keywords": [
+        "r3f",
+        "react",
+        "three",
+        "vite",
+        "starter",
+        "react three fiber",
+        "sandbox",
+        "codesandbox"
+    ],
+    "author": "Benjamin Miles <talk@benjaminmiles.com> (https://github.com/benjaminmiles)",
+    "repository": "github:benjaminmiles/react-three-vite",
+    "license": "MIT",
+    "dependencies": {
+        "@react-three/drei": "^9.97.0",
+        "@react-three/fiber": "^8.15.16",
+        "@react-three/postprocessing": "^2.15.13",
+        "loglevel": "^1.9.1",
+        "react": "18.2.0",
+        "react-dom": "18.2.0",
+        "three": "^0.161.0"
+    },
+    "devDependencies": {
+        "@types/react": "^18.2.56",
+        "@types/react-dom": "^18.2.19",
+        "@vitejs/plugin-react": "^4.2.1",
+        "@vitejs/plugin-react-swc": "^3.5.0",
+        "eslint": "^8.56.0",
+        "eslint-config-prettier": "^9.1.0",
+        "eslint-plugin-prettier": "^5.1.3",
+        "eslint-plugin-react": "^7.33.2",
+        "eslint-plugin-react-hooks": "^4.6.0",
+        "eslint-plugin-react-refresh": "^0.4.5",
+        "eslint-plugin-simple-import-sort": "^12.0.0",
+        "husky": "^8.0.0",
+        "lint-staged": "^12.5.0",
+        "prettier": "^3.2.5",
+        "vite": "^5.0.12"
+    },
+    "scripts": {
+        "dev": "vite --host",
+        "sandbox": "APP_ENV=sandbox vite",
+        "build": "vite build",
+        "preview": "vite preview",
+        "prepare": "husky install"
+    },
+    "husky": {
+        "hooks": {
+            "pre-commit": "lint-staged"
+        }
+    },
+    "lint-staged": {
+        "*.{js,jsx,ts,tsx}": [
+            "npx prettier --check",
+            "npx eslint --fix",
+            "git add"
+        ]
+    },
+    "browserslist": [
+        ">0.2%",
+        "not dead",
+        "not ie <= 11",
+        "not op_mini all"
+    ]
+}

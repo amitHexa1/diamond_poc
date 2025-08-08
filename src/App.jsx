@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { CameraControls, useGLTF } from '@react-three/drei';
+import { CameraControls, TransformControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 
 function GLBModel({
@@ -32,6 +32,8 @@ function GLBModel({
                 meshRefs.current.push(child);
             }
         });
+
+        gltf.scene.rotation.y = Math.PI;
 
         if (onModelLoaded && modelRef.current) {
             const box = new THREE.Box3().setFromObject(modelRef.current);
@@ -184,11 +186,14 @@ export default function App() {
         plane2: null,
     });
     const [perpendicular, setPerpendicular] = useState(null); // { normal, position }
-    const [clonedScene, setClonedScene] = useState(null);
-    const clonedSceneRef = useRef();
+    const [cubePosition, setCubePosition] = useState(
+        new THREE.Vector3(0, 0, 0),
+    );
+
     const glbSceneRef = useRef();
-    const perpendicularArrowRef = useRef();
+    const boxRef = useRef();
     const cameraControlsRef = useRef();
+    const transformControlsRef = useRef();
 
     useEffect(() => {
         function onResize() {
@@ -307,7 +312,10 @@ export default function App() {
             //     0,
             // ).normalize();
             let angle = Math.atan2(rotatedN1.x, rotatedN1.y); // Radians from +X
-            angle += 0.05;
+            // angle += 0.05;
+
+            //apply rotation to the rotatedN1 vector
+            rotatedN1.applyAxisAngle(new THREE.Vector3(0, 0, 1), angle);
 
             // Convert angle to degrees if needed, or keep in radians
             // console.log("Rotated angle from +X axis (deg):", THREE.MathUtils.radToDeg(angle));
@@ -318,13 +326,19 @@ export default function App() {
             ); // Negative to rotate back to align with X
 
             // Apply rotation matrix to xond mesh
-            if (clonedSceneRef.current) {
-                clonedSceneRef.current.applyMatrix4(rotationMatrix);
-                // clonedSceneRef.current.applyMatrix4(zAxisRotationMatrix);
+            if (glbSceneRef.current) {
+                glbSceneRef.current.applyMatrix4(rotationMatrix);
+                glbSceneRef.current.applyMatrix4(zAxisRotationMatrix);
+
+                const box = boxRef.current;
+                if (box) {
+                    box.applyMatrix4(rotationMatrix);
+                    box.applyMatrix4(zAxisRotationMatrix);
+                }
 
                 // Reposition it at the average position
-                clonedSceneRef.current.position.copy(averagePosition);
-                clonedSceneRef.current.position.x += 15000; // Adjust height if needed
+                // glbSceneRef.current.position.copy(averagePosition);
+                // glbSceneRef.current.position.x += 15000; // Adjust height if needed
             } else {
                 console.warn('❌ clonedSceneRef not available');
             }
@@ -332,23 +346,21 @@ export default function App() {
     };
 
     const handleFitToView = () => {
-        const clonedScene = clonedSceneRef.current;
         const glbScene = glbSceneRef.current; // We'll set this up below
+        const boxMesh = boxRef.current?.parent;
 
-        if (!clonedScene && !glbScene) {
+        if (!glbScene && !boxMesh) {
             console.warn('❌ No model found to fit.');
             return;
         }
 
         const combinedBox = new THREE.Box3();
 
-        if (clonedScene) {
-            combinedBox.expandByObject(clonedScene);
-        }
-
         if (glbScene) {
             combinedBox.expandByObject(glbScene);
         }
+
+        if (boxMesh) combinedBox.expandByObject(boxMesh);
 
         const size = new THREE.Vector3();
         combinedBox.getSize(size);
@@ -362,10 +374,10 @@ export default function App() {
 
         if (cameraControlsRef.current) {
             cameraControlsRef.current.setLookAt(
-                from.x,
+                from.x - 7500, // Adjusted to match the offset used in the model
                 from.y,
                 from.z,
-                to.x,
+                to.x - 7500,
                 to.y,
                 to.z,
                 true,
@@ -452,35 +464,39 @@ export default function App() {
                     onSelect={handleMeshSelect}
                     onModelLoaded={handleModelLoaded} // <-- this is key
                     onSceneLoaded={(scene) => {
-                        // Clone it and store
-                        const clone = scene.clone(true);
-                        clone.traverse((child) => {
-                            if (child.isMesh) {
-                                child.material = child.material.clone();
-                            }
-                        });
-                        clone.position.x += 15000; // 👈 shift to the right
-                        setClonedScene(clone);
+                        const pos = scene.position.clone();
+                        pos.x -= 15000; // same offset as before
+                        setCubePosition(pos);
                     }}
                 />
-                {clonedScene && (
-                    <primitive ref={clonedSceneRef} object={clonedScene} />
+                {glbSceneRef.current && (
+                    <TransformControls
+                        ref={transformControlsRef}
+                        object={glbSceneRef.current}
+                        mode="rotate" // "translate", "scale", or "rotate"
+                        enabled={true} // or use transformEnabled state
+                        showX={true}
+                        showY={true}
+                        showZ={true}
+                        onMouseDown={() =>
+                            (cameraControlsRef.current.enabled = false)
+                        }
+                        onMouseUp={() =>
+                            (cameraControlsRef.current.enabled = true)
+                        }
+                    />
                 )}
+                <mesh
+                    scale={2.5}
+                    position={[cubePosition.x, cubePosition.y, cubePosition.z]}>
+                    <boxGeometry
+                        attach="geometry"
+                        args={[3000, 3000, 3000]}
+                        ref={boxRef}
+                    />
+                    <meshPhysicalMaterial attach="material" color="white" />
+                </mesh>
 
-                {perpendicular && (
-                    <>
-                        {/* <PerpendicularPlane
-                            normal={perpendicular.normal}
-                            position={perpendicular.position}
-                        /> */}
-                        {/* <NormalArrow
-                            normal={perpendicular.normal}
-                            position={perpendicular.position}
-                            length={3000}
-                            color={0x00ff00}
-                        /> */}
-                    </>
-                )}
                 <axesHelper args={[5000]} />
             </Canvas>
         </div>

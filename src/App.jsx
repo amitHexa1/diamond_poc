@@ -1,7 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { CameraControls, TransformControls, useGLTF } from '@react-three/drei';
+import {
+    CameraControls,
+    Sphere,
+    TransformControls,
+    useGLTF,
+} from '@react-three/drei';
 import * as THREE from 'three';
+import { ClipPlane } from './ClipPlane';
+import { Utils } from './Utils';
 
 function GLBModel({
     activePlane,
@@ -27,6 +34,7 @@ function GLBModel({
                     child.material = child.material.clone();
                     child.material.metalness = 0.4;
                     child.material.roughness = 0.6;
+                    child.material.side = THREE.DoubleSide;
                     child.material.color = new THREE.Color(0xffffff);
                 }
                 meshRefs.current.push(child);
@@ -101,26 +109,25 @@ function GLBModel({
         const b = new THREE.Vector3().fromBufferAttribute(posAttr, face.b);
         const c = new THREE.Vector3().fromBufferAttribute(posAttr, face.c);
 
-        const centroid = new THREE.Vector3()
-            .addVectors(a, b)
-            .add(c)
-            .divideScalar(3)
-            .applyMatrix4(mesh.matrixWorld);
-
-        removeHelper(activePlane);
-
-        // const arrowHelper = new THREE.ArrowHelper(
-        //     worldNormal,
-        //     centroid,
-        //     5000,
-        //     activePlane === 'plane1' ? 0xff0000 : 0x0000ff, // different color for each plane if you want
-        // );
-
-        // helperRefs.current[activePlane] = arrowHelper;
-        // scene.add(arrowHelper);
-
-        // Pass both name, normal, and centroid
-        onSelect?.(activePlane, mesh.name, worldNormal, centroid);
+        const offsetPoint = new THREE.Vector3()
+            .copy(e.point.clone())
+            .add(worldNormal.clone().multiplyScalar(5));
+        const points = Utils.getMeshIntersectionWithLine(
+            mesh,
+            offsetPoint.clone(),
+            worldNormal.clone().negate(),
+        );
+        const distance = new THREE.Vector3()
+            .copy(points[0].point.clone())
+            .distanceTo(points[1].point.clone());
+        const midPoint = new THREE.Vector3()
+            .copy(points[0].point.clone())
+            .add(
+                new THREE.Vector3()
+                    .copy(worldNormal.clone().negate())
+                    .multiplyScalar(distance / 2),
+            );
+        onSelect?.(activePlane, mesh.name, worldNormal, midPoint);
     };
 
     return (
@@ -185,13 +192,15 @@ export default function App() {
         plane1: null,
         plane2: null,
     });
-    const [perpendicular, setPerpendicular] = useState(null); // { normal, position }
     const [cubePosition, setCubePosition] = useState(
         new THREE.Vector3(0, 0, 0),
     );
+    const [aligned, setAligned] = useState(null);
+    const [points, setPoints] = useState();
 
     const glbSceneRef = useRef();
     const boxRef = useRef();
+    const groupRef = useRef();
     const cameraControlsRef = useRef();
     const transformControlsRef = useRef();
 
@@ -213,11 +222,11 @@ export default function App() {
         return () => window.removeEventListener('resize', onResize);
     }, []);
 
-    useEffect(() => {
-        setTimeout(() => {
-            handleFitToView();
-        }, 500);
-    }, []);
+    // useEffect(() => {
+    //     setTimeout(() => {
+    //         handleFitToView();
+    //     }, 500);
+    // }, []);
 
     const handleSelectPlane1 = () => {
         if (!planeSelections.plane1) setActivePlane('plane1');
@@ -236,7 +245,7 @@ export default function App() {
         // Camera should be placed behind Z based on box size
         const distance = Math.max(size.x, size.y, size.z) * 2;
 
-        const from = center.clone().add(new THREE.Vector3(0, 0, distance));
+        const from = center.clone().add(new THREE.Vector3(0, distance, 0));
         const to = center;
 
         requestAnimationFrame(() => {
@@ -262,88 +271,70 @@ export default function App() {
         const plane2 = planeSelections.plane2;
 
         if (plane1?.normal && plane2?.normal) {
-            const n1 = plane1.normal.clone().normalize();
-            const n2 = plane2.normal.clone().normalize();
-
-            const perpNormal = new THREE.Vector3()
-                .crossVectors(n1, n2)
-                .normalize();
-            const centroid1 = plane1.centroid;
-            const centroid2 = plane2.centroid;
-
-            const averagePosition = new THREE.Vector3()
-                .addVectors(centroid1, centroid2)
-                .multiplyScalar(0.5);
-
-            // Update perpendicular visual plane
-            setPerpendicular({
-                normal: perpNormal,
-                position: averagePosition,
-            });
-
-            const camera = cameraControlsRef.current?.camera;
-            if (!camera) {
-                console.warn('❌ Camera not found.');
-                return;
-            }
-
-            const cameraDirection = new THREE.Vector3();
-            camera.getWorldDirection(cameraDirection).normalize();
-
-            // Create rotation matrix that rotates from perpNormal to cameraDirection
-            const quaternion = new THREE.Quaternion();
-            quaternion.setFromUnitVectors(
-                perpNormal.clone().normalize(),
-                cameraDirection,
+            const mesh = glbSceneRef.current.getObjectByName(plane1.meshName);
+            const planeInstance1 = new THREE.Plane();
+            planeInstance1.setFromNormalAndCoplanarPoint(
+                plane1.normal,
+                plane1.centroid,
             );
-
-            const rotationMatrix =
-                new THREE.Matrix4().makeRotationFromQuaternion(quaternion);
-
-            const rotatedN1 = n1
-                .clone()
-                .applyMatrix4(rotationMatrix)
-                .normalize();
-
-            // // --- Step 2: Project rotatedN1 onto XY plane and compute angle from +X
-            // const projected = new THREE.Vector3(
-            //     rotatedN1.x,
-            //     rotatedN1.y,
-            //     0,
-            // ).normalize();
-            let angle = Math.atan2(rotatedN1.x, rotatedN1.y); // Radians from +X
-            // angle += 0.05;
-
-            //apply rotation to the rotatedN1 vector
-            rotatedN1.applyAxisAngle(new THREE.Vector3(0, 0, 1), angle);
-
-            // Convert angle to degrees if needed, or keep in radians
-            // console.log("Rotated angle from +X axis (deg):", THREE.MathUtils.radToDeg(angle));
-
-            // --- Step 3: Create Z-axis rotation matrix
-            const zAxisRotationMatrix = new THREE.Matrix4().makeRotationZ(
-                -angle,
-            ); // Negative to rotate back to align with X
-
-            // Apply rotation matrix to xond mesh
-            if (glbSceneRef.current) {
-                glbSceneRef.current.applyMatrix4(rotationMatrix);
-                glbSceneRef.current.applyMatrix4(zAxisRotationMatrix);
-
-                const box = boxRef.current;
-                if (box) {
-                    box.applyMatrix4(rotationMatrix);
-                    box.applyMatrix4(zAxisRotationMatrix);
-                }
-
-                // Reposition it at the average position
-                // glbSceneRef.current.position.copy(averagePosition);
-                // glbSceneRef.current.position.x += 15000; // Adjust height if needed
+            const planeInstance2 = new THREE.Plane();
+            planeInstance2.setFromNormalAndCoplanarPoint(
+                plane2.normal,
+                plane2.centroid,
+            );
+            const planeShape = ClipPlane.getIntersectionContour(
+                mesh,
+                planeInstance1,
+            );
+            const point = ClipPlane.getContourPlaneIntersection(
+                planeShape,
+                planeInstance2,
+            );
+            if (point.length == 0) {
+                const mesh2 = glbSceneRef.current.getObjectByName(
+                    plane2.meshName,
+                );
+                const planeInstance1 = new THREE.Plane();
+                planeInstance1.setFromNormalAndCoplanarPoint(
+                    plane1.normal,
+                    plane1.centroid,
+                );
+                const planeInstance2 = new THREE.Plane();
+                planeInstance2.setFromNormalAndCoplanarPoint(
+                    plane2.normal,
+                    plane2.centroid,
+                );
+                const planeShape = ClipPlane.getIntersectionContour(
+                    mesh2,
+                    planeInstance2,
+                );
+                const point = ClipPlane.getContourPlaneIntersection(
+                    planeShape,
+                    planeInstance1,
+                );
+                setAligned(true);
+                setPoints(point);
             } else {
-                console.warn('❌ clonedSceneRef not available');
+                setAligned(true);
+                setPoints(point);
             }
         }
     };
+
+    useEffect(() => {
+        if (!points || !aligned) return;
+        const angleX = Utils.angleToEqualizeZ(points[0], points[1]);
+        Utils.animateRotation(glbSceneRef.current, angleX, 'x', () => {
+            const updatedPoints = [...points];
+            updatedPoints[0].applyAxisAngle(new THREE.Vector3(1, 0, 0), angleX);
+            updatedPoints[1].applyAxisAngle(new THREE.Vector3(1, 0, 0), angleX);
+            setPoints(updatedPoints);
+            setTimeout(() => {
+                const angleZ = Utils.angleZToEqualizeX(points[0], points[1]);
+                Utils.animateRotation(groupRef.current, angleZ, 'z');
+            }, 1000);
+        });
+    }, [aligned]);
 
     const handleFitToView = () => {
         const glbScene = glbSceneRef.current; // We'll set this up below
@@ -369,7 +360,7 @@ export default function App() {
 
         const distance = Math.max(size.x, size.y, size.z) * 1.5;
 
-        const from = center.clone().add(new THREE.Vector3(0, 0, distance));
+        const from = center.clone().add(new THREE.Vector3(0, distance, 0));
         const to = center;
 
         if (cameraControlsRef.current) {
@@ -458,17 +449,7 @@ export default function App() {
                 <directionalLight position={[10, 10, 10]} intensity={0.8} />
                 <directionalLight position={[-10, 10, -10]} intensity={0.6} />
                 <CameraControls ref={cameraControlsRef} />
-                <GLBModel
-                    modelRef={glbSceneRef}
-                    activePlane={activePlane}
-                    onSelect={handleMeshSelect}
-                    onModelLoaded={handleModelLoaded} // <-- this is key
-                    onSceneLoaded={(scene) => {
-                        const pos = scene.position.clone();
-                        pos.x -= 15000; // same offset as before
-                        setCubePosition(pos);
-                    }}
-                />
+
                 {glbSceneRef.current && (
                     <TransformControls
                         ref={transformControlsRef}
@@ -486,17 +467,40 @@ export default function App() {
                         }
                     />
                 )}
-                <mesh
-                    scale={2.5}
-                    position={[cubePosition.x, cubePosition.y, cubePosition.z]}>
-                    <boxGeometry
-                        attach="geometry"
-                        args={[3000, 3000, 3000]}
-                        ref={boxRef}
+                <group ref={groupRef}>
+                    <GLBModel
+                        modelRef={glbSceneRef}
+                        activePlane={activePlane}
+                        onSelect={handleMeshSelect}
+                        onModelLoaded={handleModelLoaded} // <-- this is key
+                        onSceneLoaded={(scene) => {
+                            const pos = scene.position.clone();
+                            pos.x -= 15000; // same offset as before
+                            setCubePosition(pos);
+                        }}
                     />
-                    <meshPhysicalMaterial attach="material" color="white" />
-                </mesh>
+                    <mesh
+                        scale={2.5}
+                        position={[
+                            cubePosition.x,
+                            cubePosition.y,
+                            cubePosition.z,
+                        ]}>
+                        <boxGeometry
+                            attach="geometry"
+                            args={[3000, 3000, 3000]}
+                            ref={boxRef}
+                        />
+                        <meshPhysicalMaterial attach="material" color="white" />
+                    </mesh>
+                </group>
 
+                {planeSelections.plane1 && (
+                    <NormalArrow
+                        normal={planeSelections.plane1.normal}
+                        position={planeSelections.plane1.position}
+                    />
+                )}
                 <axesHelper args={[5000]} />
             </Canvas>
         </div>
